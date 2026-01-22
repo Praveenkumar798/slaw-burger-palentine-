@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slawburger Inventory</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+</head>
+
+<body>
+    <script id="recipes-data" type="application/json">{{ recipes|tojson }}</script>
+    <script id="ingredients-data" type="application/json">{{ all_ingredients|tojson }}</script>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div>
+                    <h1>Slawburger</h1>
+                    <div class="subtitle">Management System</div>
+                </div>
+                <div class="status-indicator">
+                    <span class="dot"></span> Live
+                </div>
+            </div>
+
+            <nav class="glass-nav">
+                <button class="nav-btn active" onclick="switchTab('inventory')">
+                    <i data-feather="box"></i> Inventory
+                </button>
+                <button class="nav-btn" onclick="switchTab('receive')">
+                    <i data-feather="truck"></i> Goods Inward
+                </button>
+                <button class="nav-btn" onclick="switchTab('waste')">
+                    <i data-feather="sliders"></i> Adjustments
+                </button>
+                <button class="nav-btn" onclick="switchTab('history')">
+                    <i data-feather="clock"></i> History
+                </button>
+                <button class="nav-btn" onclick="switchTab('recipes')">
+                    <i data-feather="book-open"></i> Recipes
+                </button>
+            </nav>
+        </header>
+
+        <!-- INVENTORY TAB -->
+        <main id="tab-inventory" class="tab-content active">
+            <div style="display:flex; flex-direction:column; gap:12px; width: 100%;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h2>Overview</h2>
+                    <div style="display:flex; gap:10px;">
+                        <button id="toast-sync-btn" class="action-btn"
+                            style="width:auto; padding: 10px 20px; background: var(--accent-orange); color: black;"
+                            onclick="triggerToastSync()">
+                            <i data-feather="refresh-cw"></i> Fetch Toast Orders
+                        </button>
+                        <button class="action-btn btn-blue" style="width:auto; padding: 10px 20px;"
+                            onclick="openItemModal()">
+                            <i data-feather="plus"></i> New Item
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filters Row -->
+                <div class="filter-bar glass-panel"
+                    style="display:flex; gap:15px; padding: 12px 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.02); box-shadow: none; margin-bottom: 0;">
+                    <div style="flex: 2; position: relative;">
+                        <i data-feather="search"
+                            style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; opacity: 0.5;"></i>
+                        <input type="text" id="inventory-search" placeholder="Search ingredients..."
+                            style="padding-left: 40px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); height: 40px;"
+                            oninput="filterInventory()">
+                    </div>
+                    <div style="flex: 1;">
+                        <select id="inventory-category-filter" onchange="filterInventory()"
+                            style="height: 40px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);">
+                            <option value="all">All Categories</option>
+                            {% for category in inventory_by_category.keys() %}
+                            <option value="{{ category }}">{{ category }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px; white-space: nowrap; padding: 0 10px;">
+                        <label
+                            style="margin: 0; display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary);">
+                            <input type="checkbox" id="low-stock-only" onchange="filterInventory()"
+                                style="width: 18px; height: 18px; cursor: pointer;">
+                            Low Stock Only
+                        </label>
+                    </div>
+                </div>
+            </div>
+            {% for category, items in inventory_by_category.items() %}
+            <section class="inventory-section" data-category="{{ category }}" style="margin-bottom: 40px;">
+                <h2 class="section-title">{{ category }}</h2>
+                <div class="grid">
+                    {% for item in items %}
+                    <div class="card inventory-card" data-name="{{ item.name|lower }}" data-category="{{ category }}"
+                        data-low-stock="{{ 'true' if item.current_stock <= item.low_stock_threshold else 'false' }}">
+                        <div class="card-header">
+                            <div class="card-title">
+                                {{ item.name }}
+                                <button class="icon-btn-sm" data-item='{{ item|tojson }}'
+                                    onclick="openItemModal(JSON.parse(this.dataset.item))" title="Edit Item">
+                                    <i data-feather="edit-2" style="width:14px; height:14px;"></i>
+                                </button>
+                                <button class="icon-btn-sm" style="color: var(--accent-red);"
+                                    onclick="deleteIngredient('{{ item.id }}', '{{ item.name|escape }}')"
+                                    title="Delete Item">
+                                    <i data-feather="trash-2" style="width:14px; height:14px;"></i>
+                                </button>
+                            </div>
+                            {% if item.current_stock <= item.low_stock_threshold %} <span
+                                class="status-badge status-critical">Low</span>
+                                {% else %}
+                                <span class="status-badge status-ok">OK</span>
+                                {% endif %}
+                        </div>
+
+                        <div class="stock-info">
+                            <div>
+                                <span class="current-stock">{{ "%.1f"|format(item.current_stock) }}</span>
+                                <span class="unit">{{ item.unit }}</span>
+                            </div>
+                        </div>
+
+                        {% set fill_width = [100, (item.current_stock / (item.low_stock_threshold * 3)) * 100]|min %}
+                        {% set fill_color = 'var(--accent-red)' if item.current_stock <= item.low_stock_threshold
+                            else 'var(--accent-green)' %} <div class="progress-bg">
+                            <div class="progress-fill stock-bar" data-width="{{ fill_width }}"
+                                data-color="{{ fill_color }}"></div>
+                    </div>
+
+                    <div class="threshold-info">
+                        <span>Min: {{ item.low_stock_threshold }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+    </div>
+    </section>
+    {% endfor %}
+    </main>
+
+    <!-- GOODS INWARD TAB -->
+    <main id="tab-receive" class="tab-content">
+        <div class="split-view_large">
+            <!-- LEFT: New Receipt Form -->
+            <div class="glass-panel form-panel">
+                <h2><i data-feather="plus-circle"></i> New Goods Inward</h2>
+
+                <!-- Staging Form -->
+                <div class="staging-form">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label>Ingredient</label>
+                            <select id="recv_ingredient">
+                                <option value="">Select Item...</option>
+                                {% for item in all_ingredients %}
+                                <option value="{{ item.id }}" data-unit="{{ item.unit }}">{{ item.name }} ({{
+                                    item.unit }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Qty</label>
+                            <input type="number" step="any" id="recv_quantity" placeholder="0.0">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Total Cost ($)</label>
+                            <input type="number" step="any" id="recv_cost" placeholder="Optional">
+                        </div>
+                        <div class="form-group">
+                            <label>&nbsp;</label>
+                            <button type="button" class="action-btn btn-blue" onclick="addToStaging()">Add
+                                Line</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Staged Items List -->
+                <div class="staged-items-container"
+                    style="border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; background: rgba(0,0,0,0.1);">
+                    <table class="staged-table" id="staged-table">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Qty</th>
+                                <th>Cost</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="empty-row text-center">
+                                <td colspan="4" style="padding: 40px; opacity: 0.5;">No items added to this receipt yet.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Global Receipt Details -->
+                <div class="receipt-meta"
+                    style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Supplier</label>
+                            <input type="text" id="recv_supplier" placeholder="e.g. Sysco">
+                        </div>
+                        <div class="form-group">
+                            <label>Invoice #</label>
+                            <input type="text" id="recv_invoice" placeholder="Optional">
+                        </div>
+                    </div>
+                    <button type="button" class="action-btn btn-green" onclick="submitBulkReceipt()"
+                        id="btn-submit-receipt">
+                        <i data-feather="check"></i> Confirm Receipt
+                    </button>
+                    <div id="recv-message" class="message"></div>
+                </div>
+            </div>
+
+            <!-- RIGHT: History -->
+            <div class="glass-panel history-panel">
+                <div class="panel-header">
+                    <h2><i data-feather="clock"></i> Recent Receipts</h2>
+                    <button class="icon-btn" onclick="loadDeliveryHistoryInTab()"><i
+                            data-feather="refresh-cw"></i></button>
+                </div>
+                <div class="history-list-scroll" id="goods-in-history">
+                    <!-- Populated by JS -->
+                    <div class="loading-spinner">Loading history...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ADJUSTMENTS TAB -->
+    <main id="tab-waste" class="tab-content">
+        <div class="form-card glass-panel" style="max-width: 600px; margin: 0 auto;">
+            <h2><i data-feather="sliders"></i> Inventory Adjustment</h2>
+            <p style="opacity:0.6; margin-bottom: 20px; font-size: 0.9rem;">Log waste or manual stock corrections.
+            </p>
+            <form id="wasteForm">
+                <div class="form-group">
+                    <label>Adjustment Type</label>
+                    <div class="adj-toggle-container">
+                        <label class="adj-type-btn active" id="btn-deduct">
+                            <input type="radio" name="adj_type" value="Deduction" checked onchange="toggleAdjMode()">
+                            Deduction
+                        </label>
+                        <label class="adj-type-btn" id="btn-add">
+                            <input type="radio" name="adj_type" value="Addition" onchange="toggleAdjMode()">
+                            Addition
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Ingredient</label>
+                    <select id="waste_ingredient" required>
+                        <option value="">Select Ingredient...</option>
+                        {% for item in all_ingredients %}
+                        <option value="{{ item.id }}">{{ item.name }} ({{ item.unit }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label id="qty-label">Quantity to Deduct</label>
+                        <input type="number" step="0.01" id="waste_quantity" required placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Reason</label>
+                        <select id="waste_reason" required>
+                            <option value="Spoiled/Expired">Spoiled/Expired</option>
+                            <option value="Dropped/Contaminated">Dropped/Contaminated</option>
+                            <option value="Recipe Mismatch">Recipe Mismatch</option>
+                            <option value="Manual Correction">Manual Correction</option>
+                            <option value="Quality Control">Quality Control</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Staff Member</label>
+                    <input type="text" id="waste_staff" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Notes</label>
+                    <input type="text" id="waste_notes" placeholder="e.g. Recipe mismatch correction">
+                </div>
+
+                <button type="submit" class="action-btn btn-blue" id="adj-submit-btn">Log Adjustment</button>
+                <div id="waste-message" class="message"></div>
+            </form>
+        </div>
+    </main>
+
+    <!-- HISTORY TAB -->
+    <main id="tab-history" class="tab-content">
+        <div class="split-view">
+            <div class="glass-panel">
+                <h3>Recent Goods Inward</h3>
+                <div id="delivery-list" class="log-list">Loading...</div>
+            </div>
+            <div class="glass-panel">
+                <h3>Recent Adjustments</h3>
+                <div id="waste-list" class="log-list">Loading...</div>
+            </div>
+        </div>
+    </main>
+
+    <!-- RECIPES TAB -->
+    <main id="tab-recipes" class="tab-content">
+        <div class="split-view_large">
+            <!-- LEFT: Menu Items from Excel/Database -->
+            <div class="glass-panel menu-panel">
+                <div class="panel-header">
+                    <h2><i data-feather="list"></i> Menu Items</h2>
+                    <button class="icon-btn" onclick="loadMenuFromDatabase()" title="Reload menu items from database">
+                        <i data-feather="refresh-cw"></i> Refresh
+                    </button>
+                </div>
+                <div class="search-box" style="padding: 10px 20px;">
+                    <input type="text" id="menu-search" placeholder="Search menu items..." oninput="filterMenu()">
+                </div>
+                <div class="menu-list-scroll" id="toast-menu-list">
+                    <div class="loading-spinner">Loading menu items...</div>
+                </div>
+            </div>
+
+            <!-- RIGHT: Recipe Builder -->
+            <div class="glass-panel builder-panel">
+                <div id="builder-empty" class="empty-state" style="padding: 40px; text-align: center;">
+                    <i data-feather="arrow-left"
+                        style="width: 48px; height: 48px; opacity: 0.3; margin-bottom: 20px;"></i>
+                    <p>Select a menu item from the left to manage its recipe.</p>
+                </div>
+
+                <div id="builder-active" style="display: none; flex-direction: column; height: 100%;">
+                    <div class="panel-header"
+                        style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px;">
+                        <div>
+                            <h2 id="current-item-name">Item Name</h2>
+                            <code id="current-item-guid" style="font-size: 0.7rem; opacity: 0.5;">GUID</code>
+                        </div>
+                        <button class="btn-red icon-btn-sm"
+                            style="background: var(--accent-red); color: white; padding: 5px 10px; border-radius: 5px;"
+                            onclick="deleteCurrentRecipe()">Delete</button>
+                    </div>
+
+                    <div class="recipe-builder-content" style="flex: 1; overflow-y: auto; padding-right: 5px;">
+                        <div class="recipe-ingredients-list" style="padding: 20px 0;">
+                            <table class="staged-table" id="recipe-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ingredient</th>
+                                        <th>Qty</th>
+                                        <th>Unit</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="add-ingredient-row"
+                            style="padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px;">
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 2;">
+                                    <select id="recipe_ing_select" onchange="updateUnitOptions()">
+                                        <option value="">Add Ingredient...</option>
+                                        {% for item in all_ingredients %}
+                                        <option value="{{ item.id }}" data-unit="{{ item.unit }}">{{ item.name }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <input type="number" step="0.01" id="recipe_ing_qty" placeholder="Qty">
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <select id="recipe_ing_unit" disabled style="opacity: 0.7;">
+                                        <option value="base">Unit</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <button class="action-btn btn-blue" style="padding: 10px;"
+                                        onclick="addIngredientToRecipe()"><i data-feather="plus"></i></button>
+                                </div>
+                            </div>
+                            <button class="action-btn btn-green" style="margin-top: 10px;" onclick="saveRecipe()">Save
+                                Recipe</button>
+                            <div id="recipe-msg" class="message"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    </div>
+
+    <!-- ITEM MODAL -->
+    <div id="item-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content glass-panel">
+            <h2 id="modal-title">New Item</h2>
+            <form id="itemForm">
+                <input type="hidden" id="item_id">
+
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="item_name" required>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Category</label>
+                        <select id="item_category" required>
+                            <option value="Meat">Meat</option>
+                            <option value="Bread">Bread</option>
+                            <option value="Produce">Produce</option>
+                            <option value="Dairy">Dairy</option>
+                            <option value="sides">Sides</option>
+                            <option value="Sauce">Sauce</option>
+                            <option value="Drink">Drink</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Unit</label>
+                        <input type="text" id="item_unit" placeholder="kg, lbs, pcs" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Min Threshold</label>
+                        <input type="number" step="0.01" id="item_threshold" value="5">
+                    </div>
+                    <div class="form-group">
+                        <label>Cost ($/unit)</label>
+                        <input type="number" step="0.01" id="item_cost" placeholder="Optional">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Current Stock (Adjustment)</label>
+                    <input type="number" step="0.01" id="item_stock" placeholder="Update stock manual">
+                </div>
+
+                <div class="form-row" style="margin-top:20px;">
+                    <button type="button" class="action-btn" style="background:rgba(255,255,255,0.1);"
+                        onclick="closeItemModal()">Cancel</button>
+                    <button type="submit" class="action-btn btn-blue">Save Item</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SYNC CONFIRMATION MODAL -->
+    <div id="sync-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content glass-panel" style="max-width: 600px;">
+            <h2>Sync Confirmation</h2>
+            <div id="sync-content" style="margin: 20px 0; max-height: 400px; overflow-y: auto;">
+                <!-- Content injected via JS -->
+            </div>
+            <div class="form-row" style="margin-top:20px; gap: 10px;">
+                <button type="button" class="action-btn" style="background:rgba(255,255,255,0.1); flex: 1;"
+                    onclick="closeSyncModal()">Cancel</button>
+                <button type="button" id="confirm-sync-btn" class="action-btn btn-green" style="flex: 2;"
+                    onclick="confirmToastSync()">Confirm & Deduct Inventory</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN SCRIPT -->
+    <script>
+        feather.replace();
+
+        // Initialize stock bars
+        document.querySelectorAll('.stock-bar').forEach(bar => {
+            bar.style.width = bar.dataset.width + '%';
+            bar.style.backgroundColor = bar.dataset.color;
+        });
+
+        function switchTab(tabId) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+
+            // Show selected
+            document.getElementById('tab-' + tabId).classList.add('active');
+
+            // Highlight nav button - handle clicked element or find by onclick attr
+            const navBtn = document.querySelector(`button[onclick="switchTab('${tabId}')"]`);
+            if (navBtn) navBtn.classList.add('active');
+
+            // Persist tab
+            localStorage.setItem('activeTab', tabId);
+
+            if (tabId === 'history') {
+                loadHistory();
+            }
+            if (tabId === 'receive') { // This logic is also reinforced below
+                loadDeliveryHistoryInTab();
+            }
+            if (tabId === 'recipes') {
+                // Initial load of recipes logic
+            }
+        }
+
+        // --- GOODS IN TAB LOGIC ---
+        let stagedItems = [];
+
+        function addToStaging() {
+            const sel = document.getElementById('recv_ingredient');
+            const qtyInput = document.getElementById('recv_quantity');
+            const costInput = document.getElementById('recv_cost');
+
+            if (!sel || sel.selectedIndex === -1) return;
+
+            const option = sel.options[sel.selectedIndex];
+            const id = option.value;
+            let name = option.text;
+            const unit = option.dataset.unit || '';
+            const qty = parseFloat(qtyInput.value);
+            const cost = costInput.value ? parseFloat(costInput.value) : null;
+
+            if (!id || isNaN(qty) || qty <= 0) {
+                alert("Please select an ingredient and enter a valid quantity.");
+                return;
+            }
+
+            // Clean name: "Beef Patty (piece)" -> "Beef Patty"
+            if (name.includes('(')) {
+                name = name.split(' (')[0];
+            }
+
+            stagedItems.push({
+                ingredient_id: id,
+                ingredient_name: name,
+                quantity: qty,
+                unit_cost: cost ? (cost / qty) : null,
+                total_cost: cost,
+                unit: unit
+            });
+
+            // Reset inputs
+            sel.value = "";
+            qtyInput.value = "";
+            costInput.value = "";
+
+            renderStagedTable();
+        }
+
+        function removeFromStaging(index) {
+            stagedItems.splice(index, 1);
+            renderStagedTable();
+        }
+
+        function renderStagedTable() {
+            const table = document.getElementById('staged-table');
+            if (!table) return;
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+
+            if (stagedItems.length === 0) {
+                tbody.innerHTML = '<tr class="empty-row text-center"><td colspan="4" style="padding: 40px; opacity: 0.5;">No items added to this receipt yet.</td></tr>';
+                return;
+            }
+
+            let rows = '';
+            stagedItems.forEach((item, idx) => {
+                const costDisplay = item.total_cost ? `$${item.total_cost.toFixed(2)}` : '-';
+                rows += `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="font-weight:500;">${item.ingredient_name}</td>
+                        <td>${item.quantity} ${item.unit || ''}</td>
+                        <td>${costDisplay}</td>
+                        <td style="text-align: right;">
+                            <button class="icon-btn-sm" style="color: var(--accent-red); font-size: 1.2rem;" onclick="removeFromStaging(${idx})">
+                                &times;
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = rows;
+        }
+
+        async function submitBulkReceipt() {
+            if (stagedItems.length === 0) {
+                alert("Please add items to the receipt first.");
+                return;
+            }
+
+            const btn = document.getElementById('btn-submit-receipt');
+            const msg = document.getElementById('recv-message');
+
+            const supplier = document.getElementById('recv_supplier').value;
+            const invoice = document.getElementById('recv_invoice').value;
+
+            // Prepare payload
+            const payloadItems = stagedItems.map(i => ({
+                ingredient_id: i.ingredient_id,
+                quantity: i.quantity,
+                unit_cost: i.unit_cost,
+                supplier: supplier,
+                invoice_number: invoice,
+                notes: "Bulk Entry"
+            }));
+
+            btn.disabled = true;
+            btn.innerHTML = `<i data-feather="loader" class="spin"></i> Processing...`;
+
+            try {
+                const res = await fetch('/api/receive/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items: payloadItems })
+                });
+                const data = await res.json();
+
+                if (data.status === 'success' || data.status === 'warning') {
+                    // Success! Refresh the page to update all stock counts, 
+                    // switchTab will restore the panel thanks to localStorage
+                    window.location.reload();
+                } else {
+                    msg.innerHTML = `<span style="color:var(--accent-red)">⚠ ${data.message}</span>`;
+                }
+            } catch (err) {
+                msg.innerHTML = `<span style="color:var(--accent-red)">Error: ${err.message}</span>`;
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = `<i data-feather="check"></i> Confirm Receipt`;
+            feather.replace();
+        }
+
+        async function loadDeliveryHistoryInTab() {
+            const container = document.getElementById('goods-in-history');
+            container.innerHTML = '<div class="loading-spinner">Loading...</div>';
+
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+
+                if (!data.deliveries || data.deliveries.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No recent receipts found.</div>';
+                    return;
+                }
+
+                let html = '<table class="history-table"><thead><tr><th>Date</th><th>Item</th><th>Qty</th><th>Supplier</th></tr></thead><tbody>';
+
+                data.deliveries.forEach(d => {
+                    const date = new Date(d.timestamp).toLocaleDateString();
+                    html += `
+                        <tr>
+                            <td>${date}</td>
+                            <td>${d.ingredient_name}</td>
+                            <td>+${d.quantity_received} ${d.unit}</td>
+                            <td>${d.supplier || '-'}</td>
+                        </tr>
+                    `;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+
+            } catch (e) {
+                container.innerHTML = 'Error loading history';
+            }
+        }
+
+        // Load history initially if tab is active
+        if (document.getElementById('tab-receive').classList.contains('active')) {
+            loadDeliveryHistoryInTab();
+        }
+
+        // Initialize active tab from storage
+        const savedTab = localStorage.getItem('activeTab') || 'inventory';
+        switchTab(savedTab);
+
+        // Updated switchTab to handle specific loads
+        const originalSwitchTab = switchTab;
+        switchTab = function (tabId) {
+            originalSwitchTab(tabId);
+            if (tabId === 'receive') {
+                loadDeliveryHistoryInTab();
+            }
+        };
+
+        // --- ADJUSTMENT FORM ---
+        function toggleAdjMode() {
+            const isAdd = document.querySelector('input[name="adj_type"]:checked').value === 'Addition';
+            const qtyLabel = document.getElementById('qty-label');
+            const submitBtn = document.getElementById('adj-submit-btn');
+
+            document.querySelectorAll('.adj-type-btn').forEach(el => el.classList.remove('active'));
+
+            if (isAdd) {
+                document.getElementById('btn-add').classList.add('active');
+                qtyLabel.innerText = "Quantity to Add";
+                submitBtn.classList.remove('btn-red');
+                submitBtn.classList.add('btn-green');
+            } else {
+                document.getElementById('btn-deduct').classList.add('active');
+                qtyLabel.innerText = "Quantity to Deduct";
+                submitBtn.classList.remove('btn-green');
+                submitBtn.classList.add('btn-red');
+            }
+        }
+
+        document.getElementById('wasteForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const msg = document.getElementById('waste-message');
+            const type = document.querySelector('input[name="adj_type"]:checked').value;
+
+            btn.disabled = true;
+            btn.innerText = "Processing...";
+
+            try {
+                const res = await fetch('/api/adjust', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ingredient_id: document.getElementById('waste_ingredient').value,
+                        quantity: document.getElementById('waste_quantity').value,
+                        reason: document.getElementById('waste_reason').value,
+                        staff: document.getElementById('waste_staff').value,
+                        notes: document.getElementById('waste_notes').value,
+                        type: type
+                    })
+                });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    window.location.reload();
+                } else {
+                    msg.innerHTML = `<span style="color:var(--accent-red)">⚠ ${data.message}</span>`;
+                }
+            } catch (err) {
+                msg.innerHTML = `<span style="color:var(--accent-red)">Error: ${err.message}</span>`;
+            }
+            btn.disabled = false;
+            btn.innerText = "Log Adjustment";
+        });
+
+        // --- LOAD HISTORY ---
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+
+                // Render Deliveries
+                const delList = document.getElementById('delivery-list');
+                delList.innerHTML = data.deliveries.length ? '' : 'No recent deliveries';
+                data.deliveries.forEach(d => {
+                    delList.innerHTML += `
+                        <div class="log-item">
+                            <div class="log-header">
+                                <span class="log-title">${d.ingredient_name}</span>
+                                <span class="log-qty">+${d.quantity_received} ${d.unit}</span>
+                            </div>
+                            <div class="log-meta">
+                                ${new Date(d.timestamp).toLocaleString()} • ${d.supplier || 'No Supplier'}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                // Render Adjustments
+                const wasteList = document.getElementById('waste-list');
+                wasteList.innerHTML = data.waste.length ? '' : 'No recent adjustments';
+                data.waste.forEach(w => {
+                    const type = w.type || 'Deduction';
+                    const sign = type === 'Addition' ? '+' : '-';
+                    const colorClass = type === 'Addition' ? 'text-green' : 'text-red';
+
+                    wasteList.innerHTML += `
+                        <div class="log-item" style="border-left-color: ${type === 'Addition' ? 'var(--accent-green)' : 'var(--accent-red)'}">
+                            <div class="log-header">
+                                <span class="log-title">${w.ingredient_name}</span>
+                                <span class="log-qty ${colorClass}">${sign}${w.quantity} ${w.unit}</span>
+                            </div>
+                            <div class="log-meta">
+                                ${new Date(w.timestamp).toLocaleString()} • ${w.reason}
+                            </div>
+                        </div>
+                    `;
+                });
+
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // --- ITEM MODAL LOGIC ---
+        const modal = document.getElementById('item-modal');
+        const itemForm = document.getElementById('itemForm');
+
+        function openItemModal(item = null) {
+            modal.style.display = 'flex';
+            if (item) {
+                document.getElementById('modal-title').innerText = 'Edit Item';
+                document.getElementById('item_id').value = item.id;
+                document.getElementById('item_name').value = item.name;
+                document.getElementById('item_category').value = item.category || 'Other';
+                document.getElementById('item_unit').value = item.unit;
+                document.getElementById('item_threshold').value = item.low_stock_threshold || item.threshold || 0;
+                document.getElementById('item_cost').value = item.cost || item.cost_per_unit || '';
+                document.getElementById('item_stock').value = item.current_stock;
+            } else {
+                document.getElementById('modal-title').innerText = 'New Item';
+                itemForm.reset();
+                document.getElementById('item_id').value = '';
+            }
+        }
+
+        function closeItemModal() {
+            modal.style.display = 'none';
+        }
+
+        itemForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('item_id').value;
+            const isEdit = !!id;
+
+            const payload = {
+                name: document.getElementById('item_name').value,
+                category: document.getElementById('item_category').value,
+                unit: document.getElementById('item_unit').value,
+                threshold: document.getElementById('item_threshold').value,
+                cost_per_unit: document.getElementById('item_cost').value,
+                current_stock: document.getElementById('item_stock').value
+            };
+
+            const url = isEdit ? `/api/ingredients/${id}` : '/api/ingredients';
+            const method = isEdit ? 'PUT' : 'POST'; // Backend supports POST for new, PUT/POST for update
+
+            try {
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    // Ideally reload just the list, but full reload is safer for now to update all category views
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        });
+
+        // Close modal on outside click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeItemModal();
+        });
+
+        // --- RECIPE MANAGEMENT LOGIC ---
+        let currentRecipeGuid = null;
+        let currentRecipeItems = [];
+        let fullMenuData = [];
+        let allRecipes = JSON.parse(document.getElementById('recipes-data').textContent);
+
+        async function loadMenuFromDatabase() {
+            const list = document.getElementById('toast-menu-list');
+            list.innerHTML = '<div class="loading-spinner">Loading menu items...</div>';
+
+            try {
+                // Load menu items from Master_Data.xlsx via API endpoint
+                const res = await fetch('/api/menu/local');
+
+                if (!res.ok) {
+                    // Fallback: Create menu from existing recipes
+                    console.log('Using fallback: loading from recipes');
+                    loadMenuFromRecipes();
+                    return;
+                }
+
+                const data = await res.json();
+
+                if (data.status === 'error') {
+                    console.log('Error response, using fallback');
+                    loadMenuFromRecipes();
+                    return;
+                }
+
+                fullMenuData = data.menu_items || [];
+
+                if (fullMenuData.length === 0) {
+                    loadMenuFromRecipes();
+                    return;
+                }
+
+                renderMenu(fullMenuData);
+                feather.replace();
+            } catch (e) {
+                console.error('loadMenuFromDatabase error:', e);
+                // Fallback to loading from recipes
+                loadMenuFromRecipes();
+            }
+        }
+
+        function loadMenuFromRecipes() {
+            // Fallback: Create menu list from existing recipes
+            const list = document.getElementById('toast-menu-list');
+            fullMenuData = [];
+
+            // Get all unique GUIDs from recipes
+            for (const guid in allRecipes) {
+                fullMenuData.push({
+                    guid: guid,
+                    name: `Menu Item ${guid.substring(0, 8)}...` // Shortened GUID as placeholder
+                });
+            }
+
+            if (fullMenuData.length === 0) {
+                list.innerHTML = '<div class="empty-state">No menu items found.<br><br>To add menu items:<br>1. Edit Master_Data.xlsx<br>2. Run: python manage_recipes_excel.py</div>';
+                return;
+            }
+
+            renderMenu(fullMenuData);
+            feather.replace();
+        }
+
+        // Load menu on tab switch to recipes
+        const originalSwitchTabFunc = switchTab;
+        switchTab = function (tabId) {
+            originalSwitchTabFunc(tabId);
+            if (tabId === 'recipes' && fullMenuData.length === 0) {
+                loadMenuFromDatabase();
+            }
+        };
+
+        // Legacy function for compatibility (now calls new function)
+        async function loadToastMenu() {
+            await loadMenuFromDatabase();
+        }
+
+        function processMenuGroup(group) {
+            if (group.menuItems) {
+                group.menuItems.forEach(item => {
+                    fullMenuData.push({
+                        guid: item.guid,
+                        name: item.name
+                    });
+                });
+            }
+            if (group.menuGroups) {
+                group.menuGroups.forEach(subgroup => processMenuGroup(subgroup));
+            }
+        }
+
+        function filterMenu() {
+            const term = document.getElementById('menu-search').value.toLowerCase();
+            const filtered = fullMenuData.filter(i => i.name.toLowerCase().includes(term));
+            renderMenu(filtered);
+        }
+
+        function renderMenu(items) {
+            const list = document.getElementById('toast-menu-list');
+            if (items.length === 0) {
+                list.innerHTML = '<div class="empty-state">No items found</div>';
+                return;
+            }
+
+            list.innerHTML = items.map(item => {
+                const hasRecipe = allRecipes[item.guid] ? '<span class="status-badge status-ok">Link</span>' : '';
+                const isSelected = item.guid === currentRecipeGuid ? 'selected' : '';
+                const itemData = JSON.stringify(item).replace(/'/g, "&apos;");
+                return `
+                    <div class="menu-item-row ${isSelected}" data-item='${itemData}' onclick="editRecipeByElement(this)">
+                        <div class="menu-item-info">
+                            <div class="menu-item-name">${item.name}</div>
+                            <div class="menu-item-guid">${item.guid}</div>
+                        </div>
+                        ${hasRecipe}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function editRecipe(guid, name) {
+            currentRecipeGuid = guid;
+            document.getElementById('builder-empty').style.display = 'none';
+            document.getElementById('builder-active').style.display = 'flex';
+            document.getElementById('current-item-name').innerText = name;
+            document.getElementById('current-item-guid').innerText = guid;
+
+            currentRecipeItems = allRecipes[guid] ? [...allRecipes[guid]] : [];
+            renderRecipeTable();
+
+            // Highlight selected row
+            document.querySelectorAll('.menu-item-row').forEach(el => el.classList.remove('selected'));
+            const activeRow = [...document.querySelectorAll('.menu-item-row')].find(el => el.dataset.item && JSON.parse(el.dataset.item).guid === guid);
+            if (activeRow) activeRow.classList.add('selected');
+        }
+
+        function editRecipeByElement(el) {
+            const item = JSON.parse(el.dataset.item);
+            editRecipe(item.guid, item.name);
+        }
+
+        function renderRecipeTable() {
+            const tbody = document.querySelector('#recipe-table tbody');
+            if (currentRecipeItems.length === 0) {
+                tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No ingredients linked</td></tr>';
+                return;
+            }
+
+            const allIngs = JSON.parse(document.getElementById('ingredients-data').textContent);
+            tbody.innerHTML = currentRecipeItems.map((item, idx) => {
+                const ing = allIngs.find(i => i.id === item.ingredient_id);
+                return `
+                    <tr>
+                        <td>${ing ? ing.name : 'Unknown'}</td>
+                        <td style="width: 80px;"><input type="number" step="0.01" value="${item.quantity}" 
+                            onchange="updateRecipeQty(${idx}, this.value)" style="padding: 5px; font-size: 0.8rem; background: rgba(0,0,0,0.2); color: white; border: 1px solid rgba(255,255,255,0.1); width: 100%;"></td>
+                        <td>${ing ? ing.unit : '-'}</td>
+                        <td style="text-align: right;"><button class="icon-btn-sm text-red" onclick="removeRecipeIng(${idx})">&times;</button></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Unit Conversion Logic
+        const unitConversions = {
+            'lb': { 'lb': 1, 'oz': 1 / 16, 'kg': 2.20462, 'g': 0.00220462 },
+            'lbs': { 'lbs': 1, 'oz': 1 / 16, 'kg': 2.20462, 'g': 0.00220462 },
+            'oz': { 'oz': 1, 'lb': 16, 'g': 0.035274 },
+            'gal': { 'gal': 1, 'oz': 1 / 128, 'cup': 1 / 16, 'L': 0.264172 },
+            'gallon': { 'gallon': 1, 'oz': 1 / 128, 'cup': 1 / 16, 'L': 0.264172 },
+            'kg': { 'kg': 1, 'g': 0.001, 'lb': 0.453592 },
+            'g': { 'g': 1, 'kg': 1000, 'oz': 28.3495 },
+            'L': { 'L': 1, 'ml': 0.001, 'gal': 3.78541 },
+            'ml': { 'ml': 1, 'L': 1000, 'oz': 29.5735 }
+        };
+
+        function updateUnitOptions() {
+            const sel = document.getElementById('recipe_ing_select');
+            const unitSel = document.getElementById('recipe_ing_unit');
+            const option = sel.options[sel.selectedIndex];
+
+            unitSel.innerHTML = '';
+            unitSel.disabled = true;
+            unitSel.style.opacity = '0.7';
+
+            if (!option || !option.value) {
+                unitSel.innerHTML = '<option value="base">Unit</option>';
+                return;
+            }
+
+            const baseUnit = option.dataset.unit || 'unit';
+            const baseKey = baseUnit.toLowerCase().replace(/s$/, ''); // Remove trailing 's' roughly
+
+            unitSel.innerHTML = `<option value="1">${baseUnit}</option>`;
+            unitSel.disabled = false;
+            unitSel.style.opacity = '1';
+
+            // Check if we have conversions for this unit
+            let conv = null;
+            if (unitConversions[baseUnit]) conv = unitConversions[baseUnit];
+            else if (unitConversions[baseKey]) conv = unitConversions[baseKey];
+            else if (baseKey === 'pound') conv = unitConversions['lb'];
+            else if (baseKey === 'ounce') conv = unitConversions['oz'];
+
+            if (conv) {
+                // Add other options
+                for (const [unit, factor] of Object.entries(conv)) {
+                    if (unit !== baseUnit && unit !== baseKey) {
+                        // factor is how much of BASE makes 1 of THIS. 
+                        // Map structure: 'base': { 'other': multiplier_to_get_base }
+                        // e.g. lb -> oz (1/16). 16 oz = 1 lb. (16 * 1/16 = 1). Yes.
+                        unitSel.innerHTML += `<option value="${factor}">${unit}</option>`;
+                    }
+                }
+            }
+        }
+
+        function addIngredientToRecipe() {
+            const sel = document.getElementById('recipe_ing_select');
+            const qtyInput = document.getElementById('recipe_ing_qty');
+            const unitSel = document.getElementById('recipe_ing_unit');
+
+            const rawQty = parseFloat(qtyInput.value);
+            const conversionFactor = parseFloat(unitSel.value) || 1;
+
+            if (!sel.value || isNaN(rawQty) || rawQty <= 0) return;
+
+            // Calculate final quantity
+            const finalQty = rawQty * conversionFactor;
+
+            currentRecipeItems.push({
+                ingredient_id: sel.value,
+                quantity: parseFloat(finalQty.toFixed(4)) // Round to avoid float errors
+            });
+
+            sel.value = "";
+            qtyInput.value = "";
+            unitSel.innerHTML = '<option value="base">Unit</option>';
+            unitSel.disabled = true;
+            renderRecipeTable();
+        }
+
+        function removeRecipeIng(idx) {
+            currentRecipeItems.splice(idx, 1);
+            renderRecipeTable();
+        }
+
+        function updateRecipeQty(idx, val) {
+            currentRecipeItems[idx].quantity = parseFloat(val);
+        }
+
+        async function saveRecipe() {
+            // Use global event or passed element if we refactor, but for now standard access
+            const btn = document.querySelector('#builder-active .btn-green');
+            const msg = document.getElementById('recipe-msg');
+
+            btn.disabled = true;
+            btn.innerText = "Saving...";
+
+            try {
+                const res = await fetch('/api/recipes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        menu_guid: currentRecipeGuid,
+                        components: currentRecipeItems
+                    })
+                });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    allRecipes[currentRecipeGuid] = [...currentRecipeItems];
+                    msg.innerHTML = '<span style="color: var(--accent-green)">✓ Recipe Saved</span>';
+                    filterMenu();
+                    setTimeout(() => msg.innerHTML = '', 3000);
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (e) {
+                alert('Save error');
+            }
+            btn.disabled = false;
+            btn.innerText = "Save Recipe";
+        }
+
+        async function deleteCurrentRecipe() {
+            if (!confirm("Are you sure you want to delete this recipe?")) return;
+
+            try {
+                const res = await fetch(`/api/recipes/${currentRecipeGuid}`, { method: 'DELETE' });
+                if (res.ok) {
+                    delete allRecipes[currentRecipeGuid];
+                    currentRecipeItems = [];
+                    renderRecipeTable();
+                    filterMenu();
+                    document.getElementById('recipe-msg').innerHTML = '<span style="color: var(--accent-red)">Recipe Cleared</span>';
+                }
+            } catch (e) { alert('Delete error'); }
+        }
+
+        async function triggerToastSync() {
+            const btn = document.getElementById('toast-sync-btn');
+            const originalContent = btn.innerHTML;
+
+            btn.disabled = true;
+            btn.innerHTML = `<i data-feather="loader" class="spin"></i> Checking Sales...`;
+            feather.replace();
+
+            try {
+                const res = await fetch('/api/sync/toast', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    if (data.preview) {
+                        showSyncModal(data);
+                    } else {
+                        alert(data.message);
+                        if (data.new_orders === 0) {
+                            // No need to reload
+                        } else {
+                            window.location.reload();
+                        }
+                    }
+                } else {
+                    alert('Sync Error: ' + (data.message || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Connection Error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                feather.replace();
+            }
+        }
+
+        function showSyncModal(data) {
+            const modal = document.getElementById('sync-modal');
+            const content = document.getElementById('sync-content');
+
+            let html = `
+                <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="font-size: 1.1rem; font-weight: 600; color: var(--accent-blue); margin-bottom: 5px;">
+                        ${data.new_orders} New Orders Found
+                    </div>
+                    <div style="font-size: 0.9rem; opacity: 0.8;">
+                        The following items will be deducted from your inventory.
+                    </div>
+                </div>
+                
+                <h3 style="font-size: 1rem; margin-bottom: 10px;">Inventory Deductions:</h3>
+                <table class="history-table" style="margin-bottom: 20px;">
+                    <thead>
+                        <tr><th>Ingredient</th><th>Amount</th><th>Unit</th></tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.deductions.forEach(d => {
+                html += `<tr><td>${d.name}</td><td>-${d.quantity}</td><td>${d.unit}</td></tr>`;
+            });
+
+            if (data.deductions.length === 0) {
+                html += '<tr><td colspan="3" style="text-align:center; opacity:0.5;">No deductions mapped for these items</td></tr>';
+            }
+
+            html += `
+                    </tbody>
+                </table>
+                
+                <h3 style="font-size: 1rem; margin-bottom: 10px;">Orders to Sync:</h3>
+                <div style="display: grid; gap: 8px;">
+            `;
+
+            data.orders.slice(0, 10).forEach(o => {
+                html += `
+                    <div style="font-size: 0.85rem; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; display: flex; justify-content: space-between;">
+                        <span>#${o.orderNumber || '??'} - ${o.items.map(i => i.name).join(', ')}</span>
+                        <span style="font-weight: 600;">$${o.totalAmount}</span>
+                    </div>
+                `;
+            });
+
+            if (data.orders.length > 10) {
+                html += `<div style="text-align: center; font-size: 0.8rem; opacity: 0.5; margin-top: 5px;">...and ${data.orders.length - 10} more</div>`;
+            }
+
+            html += `</div>`;
+
+            content.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        function closeSyncModal() {
+            document.getElementById('sync-modal').style.display = 'none';
+        }
+
+        async function confirmToastSync() {
+            const btn = document.getElementById('confirm-sync-btn');
+            const originalText = btn.innerText;
+
+            btn.disabled = true;
+            btn.innerText = "Syncing Orders...";
+
+            try {
+                const res = await fetch('/api/sync/toast/confirm', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    alert(data.message);
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + data.message);
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                }
+            } catch (err) {
+                alert('Connection Error: ' + err.message);
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        }
+
+        async function deleteIngredient(id, name) {
+            if (!confirm(`Are you sure you want to delete "${name}"? This will also remove it from any recipes.`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/ingredients/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    alert(data.message);
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (err) {
+                alert('Connection Error: ' + err.message);
+            }
+        }
+
+        function filterInventory() {
+            const searchTerm = document.getElementById('inventory-search').value.toLowerCase();
+            const categoryFilter = document.getElementById('inventory-category-filter').value;
+            const lowStockOnly = document.getElementById('low-stock-only').checked;
+
+            const sections = document.querySelectorAll('.inventory-section');
+
+            sections.forEach(section => {
+                const sectionCategory = section.dataset.category;
+                const cards = section.querySelectorAll('.inventory-card');
+                let visibleCardsInSection = 0;
+
+                cards.forEach(card => {
+                    const cardName = card.dataset.name;
+                    const cardCategory = card.dataset.category;
+                    const isLowStock = card.dataset.lowStock === 'true';
+
+                    const matchesSearch = cardName.includes(searchTerm);
+                    const matchesCategory = categoryFilter === 'all' || cardCategory === categoryFilter;
+                    const matchesLowStock = !lowStockOnly || isLowStock;
+
+                    if (matchesSearch && matchesCategory && matchesLowStock) {
+                        card.style.display = 'block';
+                        visibleCardsInSection++;
+                    } else {
+                        card.style.display = 'none';
+                    }
+                });
+
+                // Hide the entire section if no cards are visible
+                if (visibleCardsInSection > 0) {
+                    section.style.display = 'block';
+                } else {
+                    section.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>
