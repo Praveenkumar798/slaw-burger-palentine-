@@ -6,6 +6,7 @@ import collections
 from datetime import datetime
 from src import toast_api
 from src.database import get_connection, init_db
+import os
 
 app = Flask(__name__)
 
@@ -23,6 +24,37 @@ adjustment_manager = AdjustmentManager()
 def health():
     """Health check endpoint"""
     return jsonify({"status": "ok", "app": "running"}), 200
+
+
+@app.route('/api/diagnostics', methods=['GET'])
+def diagnostics():
+    """Check file accessibility and environment on Render"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    creds_file = os.path.join(base_dir, 'logs', 'toast_credentials.txt')
+    db_file = os.path.join(base_dir, 'data', 'inventory.db')
+    
+    diag = {
+        "base_dir": base_dir,
+        "credentials_file": creds_file,
+        "credentials_exists": os.path.exists(creds_file),
+        "credentials_readable": os.path.isfile(creds_file) and os.access(creds_file, os.R_OK),
+        "db_file": db_file,
+        "db_exists": os.path.exists(db_file),
+        "db_readable": os.path.isfile(db_file) and os.access(db_file, os.R_OK),
+        "logs_dir_exists": os.path.exists(os.path.join(base_dir, 'logs')),
+        "data_dir_exists": os.path.exists(os.path.join(base_dir, 'data')),
+    }
+    
+    # Try to read credentials
+    if diag["credentials_readable"]:
+        try:
+            with open(creds_file, 'r') as f:
+                content = f.read()
+                diag["credentials_sample"] = content[:100] + "..." if len(content) > 100 else content
+        except Exception as e:
+            diag["credentials_read_error"] = str(e)
+    
+    return jsonify(diag), 200
 
 
 @app.route('/api/sync/toast', methods=['POST'])
