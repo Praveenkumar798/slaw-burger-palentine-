@@ -207,6 +207,7 @@ def get_order_details(access_token, restaurant_guid, order_guid):
         return None
 
 def run_sync(dry_run=False):
+    conn = None
     try:
         log("="*60)
         log(f"STARTING TOAST SALES SYNC {'(PREVIEW MODE)' if dry_run else ''}")
@@ -236,30 +237,29 @@ def run_sync(dry_run=False):
         log(f"Sync Period: {start_time_str} to {end_time_str}")
         
         order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
-    
-    if order_list is None:
-        log("Order fetch failed, attempting token refresh...")
-        success, result = refresh_access_token(creds)
-        if success:
-            creds["ACCESS_TOKEN"] = result
-            log("Retry fetching orders with new token...")
-            order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
-    
-    if order_list is None: 
-        return False, "Sync Error: API error fetching orders. Check logs/inventory_log.txt for details."
-    if not order_list:
-        if not dry_run: save_sync_time(end_time_str)
-        return True, "No new orders found"
+        
+        if order_list is None:
+            log("Order fetch failed, attempting token refresh...")
+            success, result = refresh_access_token(creds)
+            if success:
+                creds["ACCESS_TOKEN"] = result
+                log("Retry fetching orders with new token...")
+                order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
+        
+        if order_list is None: 
+            return False, "Sync Error: API error fetching orders. Check logs/inventory_log.txt for details."
+        if not order_list:
+            if not dry_run: save_sync_time(end_time_str)
+            return True, "No new orders found"
 
-    log(f"Found {len(order_list)} order(s).")
-    
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    pending_sync = []
-    total_deductions = collections.defaultdict(float)
-    
-    try:
+        log(f"Found {len(order_list)} order(s).")
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        pending_sync = []
+        total_deductions = collections.defaultdict(float)
+        
         for order_ref in order_list:
             guid = order_ref.get('guid') if isinstance(order_ref, dict) else order_ref
             if not guid: continue
@@ -326,17 +326,6 @@ def run_sync(dry_run=False):
         deductions_count = 0
         
         for order_preview in pending_sync:
-            # We need the full JSON again or better, we logic it
-            # Re-fetch or use cached? Let's re-fetch for simplicity if we are here
-            # (In reality, we should have cached it in the loop above)
-            # Re-implementing the actual storage loop based on pending_sync
-            
-            # Since we've already done the work above, let's just commit if not dry_run
-            # Wait, I should refactor to avoid double work.
-            pass
-
-        # RE-WRITING ACTUAL SYNC LOGIC TO BE ROBUST
-        for order_preview in pending_sync:
             # Need full details again to store raw_json
             order_full = get_order_details(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], order_preview['guid'])
             if not order_full: continue
@@ -401,11 +390,12 @@ def run_sync(dry_run=False):
         log(f"Error during sync: {e}")
         import traceback
         traceback.print_exc()
-        try:
-            conn.rollback()
-            conn.close()
-        except:
-            pass
+        if conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except:
+                pass
         return False, f"Sync error: {str(e)}"
 
 if __name__ == "__main__":
