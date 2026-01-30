@@ -207,34 +207,35 @@ def get_order_details(access_token, restaurant_guid, order_guid):
         return None
 
 def run_sync(dry_run=False):
-    log("="*60)
-    log(f"STARTING TOAST SALES SYNC {'(PREVIEW MODE)' if dry_run else ''}")
-    log("="*60)
-    
-    creds = load_credentials()
-    if not creds: return False, "Failed to load credentials"
+    try:
+        log("="*60)
+        log(f"STARTING TOAST SALES SYNC {'(PREVIEW MODE)' if dry_run else ''}")
+        log("="*60)
+        
+        creds = load_credentials()
+        if not creds: return False, "Failed to load credentials"
 
-    # Ensure we have a Restaurant GUID
-    if not creds.get("RESTAURANT_GUID") and creds.get("MANAGEMENT_GROUP_GUID"):
-         creds["RESTAURANT_GUID"] = creds["MANAGEMENT_GROUP_GUID"]
-         
-    if not creds.get("RESTAURANT_GUID"):
-        return False, "Missing RESTAURANT_GUID"
+        # Ensure we have a Restaurant GUID
+        if not creds.get("RESTAURANT_GUID") and creds.get("MANAGEMENT_GROUP_GUID"):
+             creds["RESTAURANT_GUID"] = creds["MANAGEMENT_GROUP_GUID"]
+             
+        if not creds.get("RESTAURANT_GUID"):
+            return False, "Missing RESTAURANT_GUID"
 
-    # Proactive token check / refresh if needed
-    if not creds.get("ACCESS_TOKEN"):
-        success, result = refresh_access_token(creds)
-        if not success:
-            return False, f"Missing access token and refresh failed: {result}"
-        creds["ACCESS_TOKEN"] = result
+        # Proactive token check / refresh if needed
+        if not creds.get("ACCESS_TOKEN"):
+            success, result = refresh_access_token(creds)
+            if not success:
+                return False, f"Missing access token and refresh failed: {result}"
+            creds["ACCESS_TOKEN"] = result
 
-    start_time_str = get_last_sync_time()
-    current_time = datetime.now()
-    end_time_str = current_time.strftime('%Y-%m-%dT%H:%M:%S.000+0000')
-    
-    log(f"Sync Period: {start_time_str} to {end_time_str}")
-    
-    order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
+        start_time_str = get_last_sync_time()
+        current_time = datetime.now()
+        end_time_str = current_time.strftime('%Y-%m-%dT%H:%M:%S.000+0000')
+        
+        log(f"Sync Period: {start_time_str} to {end_time_str}")
+        
+        order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
     
     if order_list is None:
         log("Order fetch failed, attempting token refresh...")
@@ -398,10 +399,14 @@ def run_sync(dry_run=False):
 
     except Exception as e:
         log(f"Error during sync: {e}")
-        conn.rollback()
+        import traceback
+        traceback.print_exc()
+        try:
+            conn.rollback()
+            conn.close()
+        except:
+            pass
         return False, f"Sync error: {str(e)}"
-    finally:
-        conn.close()
 
 if __name__ == "__main__":
     success, msg = run_sync()
