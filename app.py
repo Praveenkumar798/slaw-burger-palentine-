@@ -26,7 +26,13 @@ def sync_toast():
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Received sync preview request")
     try:
         # We call run_sync with dry_run=True to get the preview
-        success, result = toast_api.run_sync(dry_run=True)
+        try:
+            success, result = toast_api.run_sync(dry_run=True)
+        except Exception as sync_error:
+            print(f"Sync exception: {sync_error}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"status": "error", "message": f"Sync failed: {str(sync_error)}"}), 500
         
         if success:
             if isinstance(result, str): # "No new orders found"
@@ -59,7 +65,14 @@ def confirm_sync():
     """Finalize the sync after user approval"""
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Received sync confirmation")
     try:
-        success, message = toast_api.run_sync(dry_run=False)
+        try:
+            success, message = toast_api.run_sync(dry_run=False)
+        except Exception as sync_error:
+            print(f"Sync exception: {sync_error}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"status": "error", "message": f"Sync failed: {str(sync_error)}"}), 500
+            
         if success:
             return jsonify({"status": "success", "message": message})
         error_msg = str(message) if message else "Sync failed"
