@@ -175,7 +175,7 @@ def fetch_orders(access_token, restaurant_guid, start_date_str, end_date_str):
         log(f"  Fetching chunk: {chunk_start_str} -> {chunk_end_str}")
 
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=30)
             response.raise_for_status()
             data = response.json()
             chunk_orders = data if isinstance(data, list) else data.get('orders', [])
@@ -190,7 +190,6 @@ def fetch_orders(access_token, restaurant_guid, start_date_str, end_date_str):
 
         current_chunk_start = current_chunk_end
     return all_orders
-
 def get_order_details(access_token, restaurant_guid, order_guid):
     url = f"https://ws-api.toasttab.com/orders/v2/orders/{order_guid}"
     headers = {
@@ -199,7 +198,7 @@ def get_order_details(access_token, restaurant_guid, order_guid):
         "Content-Type": "application/json"
     }
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
