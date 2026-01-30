@@ -19,70 +19,56 @@ except Exception as e:
 inventory = InventoryManager()
 delivery_manager = GoodsInwardManager()
 adjustment_manager = AdjustmentManager()
+@app.route('/api/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({"status": "ok", "app": "running"}), 200
+
 
 @app.route('/api/sync/toast', methods=['POST'])
 def sync_toast():
-    """Initial check/preview for sync"""
-    request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"\n[{request_time}] ===== SYNC REQUEST STARTED =====")
-    
+    """Sync orders from Toast POS"""
     try:
-        print(f"[{request_time}] Calling toast_api.run_sync with dry_run=True")
+        print(f"[SYNC] Starting sync request...")
+
         success, result = toast_api.run_sync(dry_run=True)
-        print(f"[{request_time}] run_sync returned: success={success}, type(result)={type(result)}")
-        
+
         if success:
             if isinstance(result, str):
-                print(f"[{request_time}] Returning success with message: {result}")
-                return jsonify({"status": "success", "message": result, "new_orders": 0})
-            
-            if isinstance(result, dict) and 'orders' in result and 'deductions' in result:
-                print(f"[{request_time}] Returning sync preview with {len(result.get('orders', []))} orders")
+                return jsonify({"status": "success", "message": result, "new_orders": 0}), 200
+
+            if isinstance(result, dict):
                 return jsonify({
-                    "status": "success", 
+                    "status": "success",
                     "preview": True,
                     "orders": result.get('orders', []),
                     "deductions": result.get('deductions', []),
                     "new_orders": len(result.get('orders', []))
-                })
-            else:
-                print(f"[{request_time}] Result format unexpected: {result}")
-                return jsonify({"status": "success", "message": "Sync ready", "new_orders": 0})
-        
-        error_msg = str(result) if result else "Unknown error during sync"
-        print(f"[{request_time}] Returning error: {error_msg}")
-        return jsonify({"status": "error", "message": error_msg}), 500
-        
+                }), 200
+
+            return jsonify({"status": "error", "message": "Invalid response format"}), 500
+
+        return jsonify({"status": "error", "message": str(result)}), 400
+
     except Exception as e:
-        error_msg = str(e)
-        print(f"[{request_time}] EXCEPTION in sync_toast: {error_msg}")
+        print(f"[SYNC] ERROR: {str(e)}")
         import traceback
         traceback.print_exc()
-        return jsonify({"status": "error", "message": f"Sync error: {error_msg}"}), 500
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
 
 @app.route('/api/sync/toast/confirm', methods=['POST'])
 def confirm_sync():
-    """Finalize the sync after user approval"""
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Received sync confirmation")
+    """Finalize sync"""
     try:
-        try:
-            success, message = toast_api.run_sync(dry_run=False)
-        except Exception as sync_error:
-            print(f"Sync exception: {sync_error}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({"status": "error", "message": f"Sync failed: {str(sync_error)}"}), 500
-            
+        success, message = toast_api.run_sync(dry_run=False)
         if success:
-            return jsonify({"status": "success", "message": message})
-        error_msg = str(message) if message else "Sync failed"
-        return jsonify({"status": "error", "message": error_msg}), 500
+            return jsonify({"status": "success", "message": message}), 200
+        return jsonify({"status": "error", "message": str(message)}), 400
     except Exception as e:
+        print(f"[CONFIRM] ERROR: {str(e)}")
         import traceback
-        error_msg = str(e)
-        print(f"Exception in confirm_sync: {error_msg}")
         traceback.print_exc()
-        return jsonify({"status": "error", "message": error_msg}), 500
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
 
 @app.route('/')
 def dashboard():
