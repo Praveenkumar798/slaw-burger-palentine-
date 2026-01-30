@@ -5,9 +5,17 @@ from src.inventory_adjustment import AdjustmentManager
 import collections
 from datetime import datetime
 from src import toast_api
-from src.database import get_connection
+from src.database import get_connection, init_db
 
 app = Flask(__name__)
+
+# Initialize database on startup
+try:
+    init_db()
+    print("✅ Database initialized successfully")
+except Exception as e:
+    print(f"⚠️  Database initialization warning: {e}")
+
 inventory = InventoryManager()
 delivery_manager = GoodsInwardManager()
 adjustment_manager = AdjustmentManager()

@@ -1,13 +1,20 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join('data', 'inventory.db')
+# Use absolute path for database
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, 'data', 'inventory.db')
 
 def get_connection():
     """Get a connection to the SQLite database."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        print(f"Trying to connect to: {DB_PATH}")
+        raise
 
 def init_db():
     """Initialize the database schema."""
