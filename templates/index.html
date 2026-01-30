@@ -1185,7 +1185,24 @@
 
             try {
                 const res = await fetch('/api/sync/toast', { method: 'POST' });
-                const data = await res.json();
+                
+                // Check if response is OK
+                if (!res.ok) {
+                    throw new Error(`Server error: ${res.status}`);
+                }
+
+                // Check if response has content
+                const text = await res.text();
+                if (!text) {
+                    throw new Error('Empty response from server');
+                }
+
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (parseError) {
+                    throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+                }
 
                 if (data.status === 'success') {
                     if (data.preview) {
@@ -1280,7 +1297,24 @@
 
             try {
                 const res = await fetch('/api/sync/toast/confirm', { method: 'POST' });
-                const data = await res.json();
+                
+                // Check if response is OK
+                if (!res.ok) {
+                    throw new Error(`Server error: ${res.status}`);
+                }
+
+                // Check if response has content
+                const text = await res.text();
+                if (!text) {
+                    throw new Error('Empty response from server');
+                }
+
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (parseError) {
+                    throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+                }
 
                 if (data.status === 'success') {
                     alert(data.message);
