@@ -207,58 +207,287 @@ def get_order_details(access_token, restaurant_guid, order_guid):
         return None
 
 def run_sync(dry_run=False):
+    """
+    Sync orders from Toast POS
+    Returns: (success: bool, result: str or dict)
+    """
     conn = None
     try:
         log("="*60)
         log(f"STARTING TOAST SALES SYNC {'(PREVIEW MODE)' if dry_run else ''}")
         log("="*60)
         
-        creds = load_credentials()
-        if not creds: return False, "Failed to load credentials"
+        # Step 1: Load credentials
+        try:
+            creds = load_credentials()
+        except Exception as e:
+            log(f"Failed to load credentials: {e}")
+            return False, f"Failed to load credentials: {e}"
+            
+        if not creds:
+            log("No credentials found")
+            return False, "Toast credentials not configured. Please set up your credentials first."
 
-        # Ensure we have a Restaurant GUID
+        # Step 2: Check Restaurant GUID
         if not creds.get("RESTAURANT_GUID") and creds.get("MANAGEMENT_GROUP_GUID"):
              creds["RESTAURANT_GUID"] = creds["MANAGEMENT_GROUP_GUID"]
              
         if not creds.get("RESTAURANT_GUID"):
-            return False, "Missing RESTAURANT_GUID"
+            log("Missing RESTAURANT_GUID")
+            return False, "Restaurant GUID not found in credentials"
 
-        # Proactive token check / refresh if needed
+        # Step 3: Check/refresh access token
         if not creds.get("ACCESS_TOKEN"):
-            success, result = refresh_access_token(creds)
-            if not success:
-                return False, f"Missing access token and refresh failed: {result}"
-            creds["ACCESS_TOKEN"] = result
+            log("No access token, attempting refresh...")
+            try:
+                success, result = refresh_access_token(creds)
+                if not success:
+                    log(f"Token refresh failed: {result}")
+                    return False, f"Failed to refresh access token: {result}"
+                creds["ACCESS_TOKEN"] = result
+            except Exception as e:
+                log(f"Token refresh exception: {e}")
+                return False, f"Failed to refresh token: {e}"
 
-        start_time_str = get_last_sync_time()
-        current_time = datetime.now()
-        end_time_str = current_time.strftime('%Y-%m-%dT%H:%M:%S.000+0000')
+        # Step 4: Build sync time range
+        try:
+            start_time_str = get_last_sync_time()
+            current_time = datetime.now()
+            end_time_str = current_time.strftime('%Y-%m-%dT%H:%M:%S.000+0000')
+            log(f"Sync Period: {start_time_str} to {end_time_str}")
+        except Exception as e:
+            log(f"Failed to get sync time: {e}")
+            return False, f"Failed to get sync time: {e}"
         
-        log(f"Sync Period: {start_time_str} to {end_time_str}")
-        
-        order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
+        # Step 5: Fetch orders
+        try:
+            order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
+        except Exception as e:
+            log(f"Failed to fetch orders: {e}")
+            return False, f"Failed to fetch orders from Toast API: {e}"
         
         if order_list is None:
-            log("Order fetch failed, attempting token refresh...")
-            success, result = refresh_access_token(creds)
-            if success:
-                creds["ACCESS_TOKEN"] = result
-                log("Retry fetching orders with new token...")
-                order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
+            log("Order fetch returned None, attempting token refresh...")
+            try:
+                success, result = refresh_access_token(creds)
+                if success:
+                    creds["ACCESS_TOKEN"] = result
+                    log("Retrying fetch_orders with new token...")
+                    order_list = fetch_orders(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], start_time_str, end_time_str)
+                else:
+                    log(f"Token refresh failed: {result}")
+                    return False, f"Token refresh failed: {result}"
+            except Exception as e:
+                log(f"Token refresh exception: {e}")
+                return False, f"Error refreshing token: {e}"
         
         if order_list is None: 
-            return False, "Sync Error: API error fetching orders. Check logs/inventory_log.txt for details."
+            log("Order fetch still failed after token refresh")
+            return False, "Failed to fetch orders from Toast API after retry"
+        
         if not order_list:
-            if not dry_run: save_sync_time(end_time_str)
+            log("No new orders found")
+            if not dry_run: 
+                try:
+                    save_sync_time(end_time_str)
+                except:
+                    pass
             return True, "No new orders found"
 
         log(f"Found {len(order_list)} order(s).")
         
-        conn = get_connection()
-        cursor = conn.cursor()
+        # Step 6: Connect to database
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+        except Exception as e:
+            log(f"Failed to connect to database: {e}")
+            return False, f"Database connection failed: {e}"
         
         pending_sync = []
         total_deductions = collections.defaultdict(float)
+        
+        # Step 7: Process orders
+        try:
+            for order_ref in order_list:
+                guid = order_ref.get('guid') if isinstance(order_ref, dict) else order_ref
+                if not guid: 
+                    continue
+                
+                try:
+                    cursor.execute('SELECT id FROM orders WHERE toast_guid = ?', (guid,))
+                    if cursor.fetchone():
+                        continue
+                        
+                    order_full = get_order_details(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], guid)
+                    if not order_full: 
+                        continue
+                    
+                    order_preview = {
+                        'guid': guid,
+                        'orderNumber': order_full.get('orderNumber'),
+                        'totalAmount': order_full.get('totalAmount'),
+                        'closedDate': order_full.get('closedDate'),
+                        'items': []
+                    }
+                    
+                    selections = order_full.get('selections', [])
+                    if not selections and 'checks' in order_full:
+                        for check in order_full['checks']:
+                            selections.extend(check.get('selections', []))
+                    
+                    for selection in selections:
+                        item_guid = selection.get('item', {}).get('guid')
+                        quantity = selection.get('quantity', 1)
+                        
+                        try:
+                            cursor.execute('SELECT item_name FROM menu_items WHERE item_guid = ?', (item_guid,))
+                            res = cursor.fetchone()
+                            item_name = res[0] if res else selection.get('item', {}).get('name', 'Unknown')
+                        except:
+                            item_name = selection.get('item', {}).get('name', 'Unknown')
+                        
+                        order_preview['items'].append({'name': item_name, 'qty': quantity})
+                        
+                        try:
+                            cursor.execute('SELECT ingredient_id, quantity FROM recipe_components WHERE menu_item_guid = ?', (item_guid,))
+                            for component in cursor.fetchall():
+                                ing_id = component['ingredient_id']
+                                deduct_qty = component['quantity'] * quantity
+                                total_deductions[ing_id] += deduct_qty
+                        except:
+                            pass
+                    
+                    pending_sync.append(order_preview)
+                except Exception as order_error:
+                    log(f"Error processing order {guid}: {order_error}")
+                    continue
+
+            if dry_run:
+                # Format deductions with names
+                deduction_list = []
+                try:
+                    for ing_id, qty in total_deductions.items():
+                        try:
+                            cursor.execute('SELECT name, unit FROM ingredients WHERE id = ?', (ing_id,))
+                            ing = cursor.fetchone()
+                            if ing:
+                                deduction_list.append({
+                                    'name': ing['name'],
+                                    'quantity': round(qty, 4),
+                                    'unit': ing['unit']
+                                })
+                        except:
+                            pass
+                except:
+                    pass
+                
+                return True, {
+                    'orders': pending_sync,
+                    'deductions': deduction_list,
+                    'end_time': end_time_str
+                }
+
+            # Actual Sync Logic (only if not dry_run)
+            orders_stored = 0
+            deductions_count = 0
+            
+            for order_preview in pending_sync:
+                try:
+                    order_full = get_order_details(creds['ACCESS_TOKEN'], creds['RESTAURANT_GUID'], order_preview['guid'])
+                    if not order_full: 
+                        continue
+                    
+                    cursor.execute('''
+                        INSERT INTO orders (
+                            toast_guid, order_number, opened_date, closed_date, modified_date,
+                            deleted, total_amount, tax_amount, tip_amount, payment_status, source, raw_json, synced_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        order_preview['guid'],
+                        order_full.get('orderNumber'),
+                        order_full.get('openedDate'),
+                        order_full.get('closedDate'),
+                        order_full.get('modifiedDate'),
+                        order_full.get('deleted', False),
+                        order_full.get('totalAmount'),
+                        order_full.get('taxAmount'),
+                        order_full.get('tipAmount'),
+                        order_full.get('paymentStatus'),
+                        order_full.get('source'),
+                        json.dumps(order_full),
+                        datetime.now().isoformat()
+                    ))
+                    order_db_id = cursor.lastrowid
+                    orders_stored += 1
+                    
+                    selections = order_full.get('selections', [])
+                    if not selections and 'checks' in order_full:
+                        for check in order_full['checks']:
+                            selections.extend(check.get('selections', []))
+                    
+                    for selection in selections:
+                        item_guid = selection.get('item', {}).get('guid')
+                        item_name = selection.get('item', {}).get('name', 'Unknown')
+                        quantity = selection.get('quantity', 1)
+                        
+                        cursor.execute('''
+                            INSERT INTO order_items (
+                                order_id, menu_item_guid, menu_item_name, quantity, unit_price, total_price, modifiers
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (order_db_id, item_guid, item_name, quantity, selection.get('unitPrice', 0), selection.get('totalPrice', 0), json.dumps(selection.get('modifiers', []))))
+                        order_item_id = cursor.lastrowid
+                        
+                        cursor.execute('SELECT ingredient_id, quantity FROM recipe_components WHERE menu_item_guid = ?', (item_guid,))
+                        for component in cursor.fetchall():
+                            ing_id = component['ingredient_id']
+                            required_qty = component['quantity'] * quantity
+                            cursor.execute('UPDATE ingredients SET current_stock = current_stock - ? WHERE id = ?', (float(required_qty), ing_id))
+                            cursor.execute('''
+                                INSERT INTO order_deductions (
+                                    order_id, order_item_id, ingredient_id, quantity_deducted, timestamp
+                                ) VALUES (?, ?, ?, ?, ?)
+                            ''', (order_db_id, order_item_id, ing_id, float(required_qty), datetime.now().isoformat()))
+                            deductions_count += 1
+                except Exception as order_sync_error:
+                    log(f"Error syncing order {order_preview.get('guid')}: {order_sync_error}")
+                    continue
+
+            conn.commit()
+            try:
+                save_sync_time(end_time_str)
+            except:
+                pass
+            return True, f"Successfully synced {orders_stored} new orders. {deductions_count} inventory deductions logged."
+
+        except Exception as e:
+            log(f"Error during order processing: {e}")
+            import traceback
+            traceback.print_exc()
+            if conn:
+                try:
+                    conn.rollback()
+                except:
+                    pass
+            return False, f"Error processing orders: {str(e)}"
+
+    except Exception as e:
+        log(f"Unexpected error in run_sync: {e}")
+        import traceback
+        traceback.print_exc()
+        if conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except:
+                pass
+        return False, f"Unexpected error: {str(e)}"
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
         
         for order_ref in order_list:
             guid = order_ref.get('guid') if isinstance(order_ref, dict) else order_ref
